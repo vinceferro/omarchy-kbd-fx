@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "id": "thev.kbd-fx",
+  "name": "Keyboard FX",
+  "version": "1.0.0",
+  "author": "thev",
+  "description": "Breathing, typing-reactive and static effects for single-zone keyboard backlights. Runs a small Python daemon; control with the kbd-fx CLI.",
+  "kinds": [
+    "service"
+  ],
+  "entryPoints": {
+    "service": "Service.qml"
+  }
+}

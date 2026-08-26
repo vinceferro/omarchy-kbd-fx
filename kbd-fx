@@ -1,0 +1,329 @@
+#!/usr/bin/env python3
+"""Keyboard backlight FX for single-zone Apple LED (kbd_backlight).
+
+Modes: off | static | breathe | type
+
+Usage:
+  kbd-fx              cycle to next mode (and notify)
+  kbd-fx <mode>       set a specific mode
+  kbd-fx knob up|down dynamic: breathe tempo (Slow/Medium/Fast/Ultra)
+                      while breathing, resting glow level while typing,
+                      hardware brightness otherwise
+  kbd-fx up|down    adjust static brightness level
+  kbd-fx status     show current mode and level
+  kbd-fx daemon     run the daemon (used by systemd service)
+"""
+import math
+import os
+import struct
+import subprocess
+import sys
+import time
+
+CACHE = os.path.expanduser("~/.cache/kbd-fx")
+STATE = os.path.join(CACHE, "mode")
+LEVEL = os.path.join(CACHE, "level")
+PERIOD = os.path.join(CACHE, "period")
+PIDF = os.path.join(CACHE, "daemon.pid")
+LEDS = "/sys/class/leds/kbd_backlight"
+
+MODES = ["off", "static", "breathe", "type"]
+DEFAULT_LEVEL = 160
+DEFAULT_PERIOD = 6.0       # seconds per breath cycle
+PERIOD_MIN, PERIOD_MAX = 2.0, 20.0
+WRITE_MIN = 0.12           # min gap between LED writes in animated modes
+BREATHE_PERIOD = 3.2       # seconds per full breathe cycle
+TYPE_HOLD = 0.15           # stay at max while keys keep arriving
+TYPE_DECAY = 0.9           # seconds to fade back down after last keypress
+
+
+def ensure_dirs():
+    os.makedirs(CACHE, exist_ok=True)
+
+
+def write_atomic(path, data):
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
+        f.write(data)
+    os.replace(tmp, path)
+
+
+def get_mode():
+    try:
+        m = open(STATE).read().strip()
+        return m if m in MODES else "static"
+    except OSError:
+        return "static"
+
+
+def get_level():
+    try:
+        v = int(open(LEVEL).read().strip())
+    except (OSError, ValueError):
+        v = DEFAULT_LEVEL
+    return max(4, min(255, v))
+
+
+def get_period():
+    try:
+        v = float(open(PERIOD).read().strip())
+    except (OSError, ValueError):
+        v = DEFAULT_PERIOD
+    return max(PERIOD_MIN, min(PERIOD_MAX, v))
+
+
+def set_brightness(v):
+    if 0 <= v <= get_max():
+        subprocess.run(
+            ["brightnessctl", "--device=kbd_backlight", "-q", "set", str(int(v))],
+            check=False,
+        )
+
+
+def get_max():
+    try:
+        return int(open(os.path.join(LEDS, "max_brightness")).read())
+    except OSError:
+        return 255
+
+
+def get_hw():
+    try:
+        return int(open(os.path.join(LEDS, "brightness")).read())
+    except OSError:
+        return -1
+
+
+def breath_wave(ph):
+    """Organic breath curve: quick inhale (0-0.31), hold (0.31-0.4),
+    long relaxed exhale (0.4-1.0). Input and output in [0, 1]."""
+    import math
+    if ph < 0.31:
+        # smoothstep inhale
+        t = ph / 0.31
+        return t * t * (3 - 2 * t)
+    if ph < 0.40:
+        return 1.0 - 0.15 * math.sin((ph - 0.31) / 0.09 * math.pi)
+    # long exponential-ish exhale
+    t = (ph - 0.40) / 0.60
+    return (1.0 - t) ** 1.8
+
+
+def notify(msg):
+    subprocess.Popen(["notify-send", "-u", "low", "-t", "1500",
+                      "Keyboard FX", msg],
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def find_kbd_dev():
+    """Locate a keyboard event device; returns None if none found."""
+    import glob
+    candidates = sorted(glob.glob("/dev/input/by-path/*event-kbd"))
+    for c in candidates:
+        try:
+            f = open(c, "rb")
+            os.set_blocking(f.fileno(), False)
+            return f
+        except OSError:
+            continue
+    return None
+
+
+def daemon():
+    if not os.path.isdir(LEDS):
+        # no controllable keyboard backlight on this machine: exit quietly so
+        # the shell plugin supervisor does not keep restarting us
+        return
+    ensure_dirs()
+    write_atomic(PIDF, str(os.getpid()) + "\n")
+    maxb = get_max()
+    cur_mode = None
+    # start from whatever the hardware currently shows; never stomp on it
+    applied = get_hw()
+    last_lvl = get_level()
+    kf = find_kbd_dev()
+    # input_event: timeval (2 x u64) + type u16 + code u16 + value s32
+    EV_FMT = "=QQHHi"
+    EV_SIZE = struct.calcsize(EV_FMT)
+    last_press = 0.0
+    need_apply = False
+    breathe_phase = 0.0
+    last_frame = time.monotonic()
+    last_write_t = 0.0
+
+    def apply(v):
+        nonlocal applied
+        v = int(max(0, min(maxb, v)))
+        if v != applied:
+            set_brightness(v)
+            applied = v
+
+    while True:
+        now = time.monotonic()
+        dt = min(now - last_frame, 0.5)
+        last_frame = now
+        try:
+            m = get_mode()
+        except Exception:
+            m = "static"
+
+        if m != cur_mode:
+            cur_mode = m
+            need_apply = True
+
+        if m == "off":
+            if need_apply:
+                apply(0)
+            sleep_s = 0.5
+        elif m == "static":
+            lvl = get_level()
+            if lvl != last_lvl:
+                last_lvl = lvl
+                need_apply = True
+            if need_apply:
+                apply(lvl)
+            # hands-off: stock keys and Fn keys adjust freely between writes
+            sleep_s = 0.5
+        elif m == "breathe":
+            # keep level/period fresh each frame so adjustments apply live;
+            # carry phase across speed changes to avoid brightness jumps
+            period_prev = getattr(daemon, "_period", None)
+            period = get_period()
+            if period_prev is not None and period != period_prev:
+                breathe_phase *= period_prev / period
+            daemon._period = period
+            level = last_lvl = get_level()
+            breathe_phase = (breathe_phase + dt / period) % 1.0
+            wave = breath_wave(breathe_phase)
+            floor = max(2, int(level * 0.35))
+            target = floor + (level - floor) * wave
+            if now - last_write_t >= WRITE_MIN or \
+                    abs(target - applied) > level * 0.10:
+                apply(target)
+                last_write_t = now
+            sleep_s = 0.04
+        elif m == "type":
+            got_key = False
+            if kf is not None:
+                try:
+                    data = kf.read(EV_SIZE * 64)
+                    while data:
+                        for i in range(0, len(data) - EV_SIZE + 1, EV_SIZE):
+                            _, _, etype, ecode, evalue = struct.unpack(
+                                EV_FMT, data[i:i + EV_SIZE])
+                            # ignore modifier-only presses: shift/ctrl/alt/meta/caps
+                            if etype == 1 and evalue == 1 and ecode not in \
+                                    (29, 42, 54, 56, 58, 97, 100, 125):
+                                got_key = True
+                        data = kf.read(EV_SIZE * 64)
+                except BlockingIOError:
+                    pass
+            if got_key:
+                last_press = now
+            level = last_lvl = get_level()
+            if now - last_press < TYPE_HOLD:
+                target = maxb
+            else:
+                t = min((now - last_press - TYPE_HOLD) / TYPE_DECAY, 1.0)
+                target = level + (maxb - level) * (1.0 - t)
+            if target != applied:
+                apply(target)
+                last_write_t = now
+            sleep_s = 0.04
+        else:
+            if need_apply:
+                apply(get_level())
+            sleep_s = 0.5
+
+        need_apply = False
+        time.sleep(sleep_s)
+
+
+def breath_label(p):
+    if p > 7.0:
+        return "Slow"
+    if p > 4.5:
+        return "Medium"
+    if p > 2.8:
+        return "Fast"
+    return "Ultra"
+
+
+def cli():
+    global PIDF
+    ensure_dirs()
+    arg = sys.argv[1] if len(sys.argv) > 1 else "cycle"
+
+    if arg == "status":
+        print(f"mode: {get_mode()}\nlevel: {get_level()}/{get_max()}"
+              f"\nperiod: {get_period():.1f}s")
+        return
+    if arg in ("faster", "slower"):
+        p = get_period()
+        p = p / 1.35 if arg == "faster" else p * 1.35
+        p = max(PERIOD_MIN, min(PERIOD_MAX, p))
+        write_atomic(PERIOD, f"{p:.2f}")
+        # breath speed as an OSD bar: fastest -> 100%, slowest -> 0%
+        pct = int(round((PERIOD_MAX - p) / (PERIOD_MAX - PERIOD_MIN) * 100))
+        subprocess.Popen(
+            ["omarchy-osd", "-i", "keyboard",
+             "-m", f"Breath {breath_label(p)} ({p:.1f}s)", "-p", str(pct)],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return
+    if arg == "knob":
+        # context-sensitive control: tempo while breathing, resting level
+        # while typing, hardware brightness otherwise
+        d = sys.argv[2] if len(sys.argv) > 2 else "up"
+        m = get_mode()
+        if m == "breathe":
+            argv = sys.argv
+            sys.argv = ["kbd-fx", "faster" if d == "up" else "slower"]
+            try:
+                cli()
+            finally:
+                sys.argv = argv
+            return
+        if m == "type":
+            step = max(8, get_max() // 10)
+            lvl = get_level() + (step if d == "up" else -step)
+            lvl = max(8, min(get_max(), lvl))
+            write_atomic(LEVEL, str(lvl))
+            subprocess.Popen(["omarchy-osd", "-i", "keyboard",
+                              "-p", str(lvl * 100 // get_max())],
+                             stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL)
+            return
+        subprocess.Popen(["omarchy-brightness-keyboard",
+                          "up" if d == "up" else "down"],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return
+    if arg == "cycle":
+        cur = get_mode()
+        nxt = MODES[(MODES.index(cur) + 1) % len(MODES)]
+        write_atomic(STATE, nxt)
+        notify(f"{nxt}")
+        return
+    if arg in MODES:
+        write_atomic(STATE, arg)
+        notify(arg)
+        return
+    if arg in ("up", "down"):
+        step = max(8, get_max() // 10)
+        lvl = get_level()
+        lvl = lvl + step if arg == "up" else lvl - step
+        lvl = max(8, min(get_max(), lvl))
+        write_atomic(LEVEL, str(lvl))
+        set_brightness(lvl)
+        subprocess.Popen(["omarchy-osd", "-i", "keyboard",
+                          "-p", str(lvl * 100 // get_max())],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return
+    if arg == "daemon":
+        daemon()
+        return
+    print(__doc__)
+    sys.exit(2)
+
+
+if __name__ == "__main__":
+    cli()
