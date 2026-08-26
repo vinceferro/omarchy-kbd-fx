@@ -25,7 +25,7 @@ Plugins cannot register Hyprland bindings, so add these yourself in
 
 ```lua
 -- Make sure the CLI is on PATH first:
---   ln -sf ~/.config/omarchy/plugins/thev.kbd-fx/kbd-fx ~/.local/bin/kbd-fx
+--   ln -sf ~/.config/omarchy/plugins/vinceferro.kbd-fx/kbd-fx ~/.local/bin/kbd-fx
 o.bind("SUPER + B", "Keyboard FX: cycle mode", "kbd-fx cycle")
 o.bind("SUPER + BRACKETRIGHT", "Keyboard FX: knob up", "kbd-fx knob up")
 o.bind("SUPER + BRACKETLEFT", "Keyboard FX: knob down", "kbd-fx knob down")
@@ -56,7 +56,7 @@ kbd-fx status         # current mode / level / period
 
 ## Customizing
 
-Edit the copy inside `~/.config/omarchy/plugins/thev.kbd-fx/kbd-fx` —
+Edit the copy inside `~/.config/omarchy/plugins/vinceferro.kbd-fx/kbd-fx` —
 the interesting constants are at the top (breath curve shape is in
 `breath_wave()`, decay times, tempo ranges). Changes apply after one
 restart: `omarchy-shell shell rescanPlugins` or log out/in.
