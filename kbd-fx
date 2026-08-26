@@ -29,10 +29,11 @@ LEDS = "/sys/class/leds/kbd_backlight"
 
 MODES = ["off", "static", "breathe", "type"]
 DEFAULT_LEVEL = 160
-DEFAULT_PERIOD = 6.0       # seconds per breath cycle
-PERIOD_MIN, PERIOD_MAX = 2.0, 20.0
+TEMPOS = [2.0, 3.5, 5.0]   # seconds per breath cycle: Fast / Medium / Slow
+TEMPO_LABELS = ["Fast", "Medium", "Slow"]
+DEFAULT_PERIOD = 3.5
+PERIOD_MIN, PERIOD_MAX = min(TEMPOS), max(TEMPOS)
 WRITE_MIN = 0.12           # min gap between LED writes in animated modes
-BREATHE_PERIOD = 3.2       # seconds per full breathe cycle
 TYPE_HOLD = 0.15           # stay at max while keys keep arriving
 TYPE_DECAY = 0.9           # seconds to fade back down after last keypress
 
@@ -69,7 +70,19 @@ def get_period():
         v = float(open(PERIOD).read().strip())
     except (OSError, ValueError):
         v = DEFAULT_PERIOD
-    return max(PERIOD_MIN, min(PERIOD_MAX, v))
+    # snap to the nearest discrete tempo slot
+    return min(TEMPOS, key=lambda t: abs(t - v))
+
+
+def tempo_idx():
+    p = get_period()
+    return TEMPOS.index(p)
+
+
+def tempo_pct():
+    """0-100 for the OSD bar: Fast -> 100%, Slow -> 0%."""
+    idx = tempo_idx()
+    return int(round((len(TEMPOS) - 1 - idx) / (len(TEMPOS) - 1) * 100))
 
 
 def set_brightness(v):
@@ -240,13 +253,10 @@ def daemon():
 
 
 def breath_label(p):
-    if p > 7.0:
-        return "Slow"
-    if p > 4.5:
-        return "Medium"
-    if p > 2.8:
-        return "Fast"
-    return "Ultra"
+    try:
+        return TEMPO_LABELS[TEMPOS.index(p)]
+    except ValueError:
+        return f"{p:.1f}s"
 
 
 def cli():
@@ -255,19 +265,19 @@ def cli():
     arg = sys.argv[1] if len(sys.argv) > 1 else "cycle"
 
     if arg == "status":
+        p = get_period()
         print(f"mode: {get_mode()}\nlevel: {get_level()}/{get_max()}"
-              f"\nperiod: {get_period():.1f}s")
+              f"\nperiod: {p:.1f}s ({breath_label(p)})")
         return
     if arg in ("faster", "slower"):
-        p = get_period()
-        p = p / 1.35 if arg == "faster" else p * 1.35
-        p = max(PERIOD_MIN, min(PERIOD_MAX, p))
+        idx = tempo_idx() + (-1 if arg == "faster" else 1)
+        idx = max(0, min(len(TEMPOS) - 1, idx))
+        p = TEMPOS[idx]
         write_atomic(PERIOD, f"{p:.2f}")
-        # breath speed as an OSD bar: fastest -> 100%, slowest -> 0%
-        pct = int(round((PERIOD_MAX - p) / (PERIOD_MAX - PERIOD_MIN) * 100))
         subprocess.Popen(
             ["omarchy-osd", "-i", "keyboard",
-             "-m", f"Breath {breath_label(p)} ({p:.1f}s)", "-p", str(pct)],
+             "-m", f"Breath {TEMPO_LABELS[idx]} ({p:.1f}s)",
+             "-p", str(tempo_pct())],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         return
     if arg == "knob":
