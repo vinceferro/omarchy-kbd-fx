@@ -20,7 +20,24 @@ Item {
 
   readonly property bool supported: probe.exitCode === 0
 
-  Component.onCompleted: probe.running = true
+  Component.onCompleted: {
+    probe.running = true
+    // First-run setup: PATH symlink + keybindings (idempotent, no-ops when
+    // already configured). Runs on every shell start so it self-heals.
+    setup.running = true
+  }
+
+  Process {
+    id: setup
+    command: ["bash", root.setupPath]
+    stdout: StdioCollector {}
+    stderr: StdioCollector {}
+  }
+
+  property string setupPath: {
+    var url = Qt.resolvedUrl("setup.sh").toString()
+    return decodeURIComponent(url.replace(/^file:\/\//, ""))
+  }
 
   // One-shot capability check before spawning the daemon.
   Process {

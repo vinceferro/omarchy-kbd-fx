@@ -8,33 +8,32 @@ runs as an Omarchy shell service plugin.
 
 ## Install
 
+One command:
+
 ```bash
 omarchy plugin add https://github.com/vinceferro/omarchy-kbd-fx.git --enable
 ```
 
-For the typing-reactive effect your user needs read access to input devices
-(default on Omarchy via the `input` group): `groups | grep -q input || echo 'add yourself: sudo usermod -aG input $USER'`.
+That's it. On first shell start the plugin links its CLI into `~/.local/bin`
+and adds the keybindings below to `~/.config/hypr/bindings.lua`
+(marker-guarded block, never touches existing bindings).
 
 The service starts with the shell and supervises the daemon automatically.
 On machines without a controllable `kbd_backlight` LED it exits quietly.
 
-Requirements (checked at startup): `/sys/class/leds/kbd_backlight` and
-`brightnessctl` (installed by default on Omarchy).
+Requirements: `/sys/class/leds/kbd_backlight`, `brightnessctl` (installed by
+default on Omarchy). For the typing-reactive effect your user needs read
+access to input devices (default on Omarchy via the `input` group).
 
 ## Keybindings
 
-Plugins cannot register Hyprland bindings, so add these yourself in
-`~/.config/hypr/bindings.lua`:
+| Keys | Action |
+|---|---|
+| `SUPER + B` | cycle mode: off → static → breathe → type |
+| `SUPER + ]` / `SUPER + [` | context knob (see table below) |
 
-```lua
--- Make sure the CLI is on PATH first:
---   ln -sf ~/.config/omarchy/plugins/vinceferro.kbd-fx/kbd-fx ~/.local/bin/kbd-fx
-o.bind("SUPER + B", "Keyboard FX: cycle mode", "kbd-fx cycle")
-o.bind("SUPER + BRACKETRIGHT", "Keyboard FX: knob up", "kbd-fx knob up")
-o.bind("SUPER + BRACKETLEFT", "Keyboard FX: knob down", "kbd-fx knob down")
-```
-
-Then reload with `hyprctl reload`.
+To remove them, delete the `>>> keyboard-fx` marked block in your
+`bindings.lua`.
 
 ## The dynamic knobs
 
