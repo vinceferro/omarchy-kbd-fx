@@ -9,8 +9,11 @@ runs as an Omarchy shell service plugin.
 ## Install
 
 ```bash
-omarchy plugin add https://github.com/<you>/omarchy-kbd-fx.git --enable
+omarchy plugin add https://github.com/vinceferro/omarchy-kbd-fx.git --enable
 ```
+
+For the typing-reactive effect your user needs read access to input devices
+(default on Omarchy via the `input` group): `groups | grep -q input || echo 'add yourself: sudo usermod -aG input $USER'`.
 
 The service starts with the shell and supervises the daemon automatically.
 On machines without a controllable `kbd_backlight` LED it exits quietly.
@@ -39,18 +42,21 @@ Then reload with `hyprctl reload`.
 |---|---|---|
 | `off` | backlight off | hardware brightness |
 | `static` | steady glow at your level | hardware brightness (persists) |
-| `breathe` | organic breath cycle | tempo: Slow / Medium / Fast / Ultra |
+| `breathe` | organic breath cycle | tempo: Fast (2s) / Medium (3.5s) / Slow (5s) |
 | `type` | pulses to full while typing, decays after | resting glow level |
 
 State (mode, level, tempo) persists across reboots in `~/.cache/kbd-fx/`.
 
+All feedback — mode changes, brightness, tempo — shows as the standard
+Omarchy OSD bar.
+
 ## CLI reference
 
 ```bash
-kbd-fx                # cycle mode (notifies)
+kbd-fx                # cycle mode (OSD)
 kbd-fx <mode>         # off | static | breathe | type
 kbd-fx knob up|down   # context-sensitive control (see table above)
-kbd-fx faster|slower  # breathe tempo directly
+kbd-fx faster|slower  # breathe tempo directly (snaps between the 3 slots)
 kbd-fx status         # current mode / level / period
 ```
 
