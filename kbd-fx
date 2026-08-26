@@ -122,12 +122,6 @@ def breath_wave(ph):
     return (1.0 - t) ** 1.8
 
 
-def notify(msg):
-    subprocess.Popen(["notify-send", "-u", "low", "-t", "1500",
-                      "Keyboard FX", msg],
-                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-
-
 def find_kbd_dev():
     """Locate a keyboard event device; returns None if none found."""
     import glob
@@ -259,6 +253,16 @@ def breath_label(p):
         return f"{p:.1f}s"
 
 
+def show_mode_osd(mode):
+    """OSD feedback for mode changes, same surface as brightness/tempo."""
+    icons = {"off": "keyboard", "static": "keyboard",
+             "breathe": "keyboard", "type": "keyboard"}
+    subprocess.Popen(
+        ["omarchy-osd", "-i", icons.get(mode, "keyboard"),
+         "-m", f"Mode: {mode.capitalize()}"],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
 def cli():
     global PIDF
     ensure_dirs()
@@ -311,11 +315,11 @@ def cli():
         cur = get_mode()
         nxt = MODES[(MODES.index(cur) + 1) % len(MODES)]
         write_atomic(STATE, nxt)
-        notify(f"{nxt}")
+        show_mode_osd(nxt)
         return
     if arg in MODES:
         write_atomic(STATE, arg)
-        notify(arg)
+        show_mode_osd(arg)
         return
     if arg in ("up", "down"):
         step = max(8, get_max() // 10)
