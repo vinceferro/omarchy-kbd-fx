@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "vinceferro.kbd-fx",
   "name": "Keyboard FX",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "author": "thev",
   "description": "Breathing, typing-reactive and static effects for single-zone keyboard backlights. Runs a small Python daemon; control with the kbd-fx CLI.",
   "kinds": [

@@ -1,2 +1,7 @@
+# build artifacts
 __pycache__/
-__pycache__/
+*.pyc
+*.egg-info/
+
+# js test noise
+node_modules/

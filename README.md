@@ -6,12 +6,16 @@ runs as an Omarchy shell service plugin.
 
 ![kind: service](https://img.shields.io/badge/kind-service-blue)
 
+- Plugin id: `vinceferro.kbd-fx`
+- Kind: `service` (mounts at shell startup; the daemon exits quietly on
+  machines without a controllable `kbd_backlight` LED)
+
 ## Install
 
 One command:
 
 ```bash
-omarchy plugin add https://github.com/vinceferro/omarchy-kbd-fx.git --enable
+omarchy plugin add https://github.com/vinceferro/omarchy-kbd-fx.git --enable --yes
 ```
 
 That's it. On first shell start the plugin links its CLI into `~/.local/bin`
@@ -19,7 +23,17 @@ and adds the keybindings below to `~/.config/hypr/bindings.lua`
 (marker-guarded block, never touches existing bindings).
 
 The service starts with the shell and supervises the daemon automatically.
-On machines without a controllable `kbd_backlight` LED it exits quietly.
+
+**Already installed an earlier version?** Once this repo is git-managed,
+update in place with:
+
+```bash
+omarchy plugin update vinceferro.kbd-fx
+```
+
+If your installed clone predates git-managed releases, remove and re-add
+instead: `omarchy plugin remove vinceferro.kbd-fx` then the install command
+above.
 
 Requirements: `/sys/class/leds/kbd_backlight`, `brightnessctl` (installed by
 default on Omarchy). For the typing-reactive effect your user needs read
@@ -65,3 +79,7 @@ Edit the copy inside `~/.config/omarchy/plugins/vinceferro.kbd-fx/kbd-fx` —
 the interesting constants are at the top (breath curve shape is in
 `breath_wave()`, decay times, tempo ranges). Changes apply after one
 restart: `omarchy-shell shell rescanPlugins` or log out/in.
+
+## License
+
+MIT
